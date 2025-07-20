@@ -1,12 +1,13 @@
 let mapSender;
 let markerSender;
-let envioIntervalId = null; // ID del intervalo para poder detenerlo
+let envioIntervalId = null;
+let watchId = null;
+let ultimaUbicacion = null;
 
-// Función de inicialización del mapa
+// Inicializa el mapa
 document.addEventListener('DOMContentLoaded', () => {
-    const initialCoords = [13.6929, -89.2182]; // Coordenadas iniciales (San Salvador)
-
-    mapSender = L.map('map_sender').setView(initialCoords, 12); // Crea el mapa
+    const initialCoords = [13.6929, -89.2182];
+    mapSender = L.map('map_sender').setView(initialCoords, 12);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
@@ -34,20 +35,19 @@ function enviarUbicacionEnTiempoReal() {
         maximumAge: 0,
     };
 
-    // Primero obtenemos y mostramos la ubicación actual una vez
-    navigator.geolocation.getCurrentPosition((position) => {
-        actualizarUbicacion(position, ubicacionTexto);
+    // Comenzamos a rastrear ubicación y guardar la última conocida
+    watchId = navigator.geolocation.watchPosition((position) => {
+        ultimaUbicacion = position;
+        actualizarUbicacion(position, ubicacionTexto); // para mostrar en pantalla
     }, (error) => {
         mostrarError(error, ubicacionTexto);
     }, options);
 
-    // Luego comenzamos a enviar la ubicación cada 10 segundos
+    // Cada 10 segundos, enviamos la última ubicación conocida
     envioIntervalId = setInterval(() => {
-        navigator.geolocation.getCurrentPosition((position) => {
-            actualizarUbicacion(position, ubicacionTexto);
-        }, (error) => {
-            mostrarError(error, ubicacionTexto);
-        }, options);
+        if (ultimaUbicacion) {
+            enviarAFirestore(ultimaUbicacion);
+        }
     }, 10000); // Cada 10 segundos
 }
 
@@ -56,15 +56,18 @@ function actualizarUbicacion(position, ubicacionTexto) {
     const lng = position.coords.longitude;
     const newCoords = [lat, lng];
 
-    // Actualiza el marcador y centra el mapa
     markerSender.setLatLng(newCoords);
     mapSender.setView(newCoords, 15);
 
     ubicacionTexto.innerHTML = `<p>Estado: Compartiendo ubicación.</p>
                                 <p>Latitud: ${lat.toFixed(6)}</p>
                                 <p>Longitud: ${lng.toFixed(6)}</p>`;
+}
 
-    // Enviar a Firestore
+function enviarAFirestore(position) {
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+
     db.collection("ubicaciones").doc("ubicacion_actual").set({
         latitude: lat,
         longitude: lng,
@@ -88,10 +91,13 @@ function detenerEnvioUbicacion() {
     if (envioIntervalId !== null) {
         clearInterval(envioIntervalId);
         envioIntervalId = null;
-        document.getElementById("ubicacion_actual_texto").innerHTML = "<p>Estado: Envío de ubicación detenido.</p>";
-        console.log("Envío de ubicación detenido.");
-        alert("Envío de ubicación detenido.");
-    } else {
-        alert("No se está compartiendo ninguna ubicación.");
     }
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+
+    document.getElementById("ubicacion_actual_texto").innerHTML = "<p>Estado: Envío de ubicación detenido.</p>";
+    console.log("Envío de ubicación detenido.");
+    alert("Envío de ubicación detenido.");
 }
